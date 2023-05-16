@@ -1,4 +1,9 @@
+local mock = require("luassert.mock")
+local stub = require("luassert.stub")
+local spy = require("luassert.spy")
+
 local diagnostics = require("null-ls.builtins").diagnostics
+mock(require("null-ls.logger"), true)
 
 describe("diagnostics", function()
     describe("spectral", function()
@@ -340,6 +345,7 @@ describe("diagnostics", function()
                 row = "1",
                 col = "1",
                 message = "Inline HTML [Element: a]",
+                severity = 2,
             }, diagnostic)
         end)
         it("should create a diagnostic without a column", function()
@@ -350,6 +356,7 @@ describe("diagnostics", function()
                 row = "2",
                 code = "MD012/no-multiple-blanks",
                 message = "Multiple consecutive blank lines [Expected: 1; Actual: 2]",
+                severity = 2,
             }, diagnostic)
         end)
     end)
@@ -573,8 +580,81 @@ describe("diagnostics", function()
         local linter = diagnostics.eslint
         local parser = linter._opts.on_output
 
-        it("should create a diagnostic with warning severity", function()
-            local output = vim.json.decode([[
+        describe("with non fixable diagnostic", function()
+            it("should create a diagnostic with warning severity", function()
+                local output = vim.json.decode([[
+            [{
+              "filePath": "/home/luc/Projects/Pi-OpenCast/webapp/src/index.js",
+              "messages": [
+                {
+                  "ruleId": "quotes",
+                  "severity": 1,
+                  "message": "Strings must use singlequote.",
+                  "line": 1,
+                  "column": 19,
+                  "nodeType": "Literal",
+                  "messageId": "wrongQuotes",
+                  "endLine": 1,
+                  "endColumn": 26
+                }
+              ]
+            }] ]])
+                local diagnostic = parser({ output = output })
+                assert.same({
+                    {
+                        row = 1,
+                        end_row = 1,
+                        col = 19,
+                        end_col = 26,
+                        severity = 2,
+                        code = "quotes",
+                        message = "Strings must use singlequote.",
+                        user_data = {
+                            fixable = false,
+                        },
+                    },
+                }, diagnostic)
+            end)
+
+            it("should create a diagnostic with error severity", function()
+                local output = vim.json.decode([[
+            [{
+              "filePath": "/home/luc/Projects/Pi-OpenCast/webapp/src/index.js",
+              "messages": [
+                {
+                  "ruleId": "quotes",
+                  "severity": 2,
+                  "message": "Strings must use singlequote.",
+                  "line": 1,
+                  "column": 19,
+                  "nodeType": "Literal",
+                  "messageId": "wrongQuotes",
+                  "endLine": 1,
+                  "endColumn": 26
+                }
+              ]
+            }] ]])
+                local diagnostic = parser({ output = output })
+                assert.same({
+                    {
+                        row = 1,
+                        end_row = 1,
+                        col = 19,
+                        end_col = 26,
+                        severity = 1,
+                        code = "quotes",
+                        message = "Strings must use singlequote.",
+                        user_data = {
+                            fixable = false,
+                        },
+                    },
+                }, diagnostic)
+            end)
+        end)
+
+        describe("with fixable diagnostic", function()
+            it("should create a diagnostic with warning severity", function()
+                local output = vim.json.decode([[
             [{
               "filePath": "/home/luc/Projects/Pi-OpenCast/webapp/src/index.js",
               "messages": [
@@ -598,21 +678,25 @@ describe("diagnostics", function()
                 }
               ]
             }] ]])
-            local diagnostic = parser({ output = output })
-            assert.same({
-                {
-                    row = 1,
-                    end_row = 1,
-                    col = 19,
-                    end_col = 26,
-                    severity = 2,
-                    code = "quotes",
-                    message = "Strings must use singlequote.",
-                },
-            }, diagnostic)
-        end)
-        it("should create a diagnostic with error severity", function()
-            local output = vim.json.decode([[
+                local diagnostic = parser({ output = output })
+                assert.same({
+                    {
+                        row = 1,
+                        end_row = 1,
+                        col = 19,
+                        end_col = 26,
+                        severity = 2,
+                        code = "quotes",
+                        message = "Strings must use singlequote.",
+                        user_data = {
+                            fixable = true,
+                        },
+                    },
+                }, diagnostic)
+            end)
+
+            it("should create a diagnostic with error severity", function()
+                local output = vim.json.decode([[
             [{
               "filePath": "/home/luc/Projects/Pi-OpenCast/webapp/src/index.js",
               "messages": [
@@ -636,18 +720,22 @@ describe("diagnostics", function()
                 }
               ]
             }] ]])
-            local diagnostic = parser({ output = output })
-            assert.same({
-                {
-                    row = 1,
-                    end_row = 1,
-                    col = 19,
-                    end_col = 26,
-                    severity = 1,
-                    code = "quotes",
-                    message = "Strings must use singlequote.",
-                },
-            }, diagnostic)
+                local diagnostic = parser({ output = output })
+                assert.same({
+                    {
+                        row = 1,
+                        end_row = 1,
+                        col = 19,
+                        end_col = 26,
+                        severity = 1,
+                        code = "quotes",
+                        message = "Strings must use singlequote.",
+                        user_data = {
+                            fixable = true,
+                        },
+                    },
+                }, diagnostic)
+            end)
         end)
     end)
 
@@ -749,6 +837,88 @@ describe("diagnostics", function()
                 severity = 1,
                 code = "E265",
                 message = "block comment should start with '# '",
+            }, diagnostic)
+        end)
+    end)
+
+    describe("pylint", function()
+        local linter = diagnostics.pylint
+        local parser = linter._opts.on_output
+        local u = require("null-ls.utils")
+        local params = { bufnr = 4, bufname = "test" }
+        local root_pattern
+        local output = vim.json.decode([[
+        [
+            {
+                "type": "convention",
+                "module": "test",
+                "obj": "",
+                "line": 1,
+                "column": 0,
+                "endLine": null,
+                "endColumn": null,
+                "path": "test.py",
+                "symbol": "missing-module-docstring",
+                "message": "Missing module docstring",
+                "message-id": "C0114"
+                },
+                {
+                "type": "convention",
+                "module": "test",
+                "obj": "",
+                "line": 1,
+                "column": 0,
+                "endLine": 1,
+                "endColumn": 1,
+                "path": "test.py",
+                "symbol": "invalid-name",
+                "message": "Constant name \"s\" doesn't conform to UPPER_CASE naming style",
+                "message-id": "C0103"
+                }
+        ]
+        ]])
+        before_each(function()
+            root_pattern = stub(u, "root_pattern")
+        end)
+        after_each(function()
+            root_pattern:revert()
+        end)
+
+        it("should set the cwd param", function()
+            assert.truthy(type(linter._opts.cwd) == "function")
+            local s = spy.new(function(loc_params)
+                return loc_params
+            end)
+            root_pattern.returns(s)
+            local cwd = linter._opts.cwd(params)
+            assert.same(params.bufname, cwd)
+            assert.stub(root_pattern).was.called_with("pylintrc", ".pylintrc", "pyproject.toml", "setup.cfg", "tox.ini")
+            assert.spy(s).was.called_with(params.bufname)
+        end)
+
+        it("should create a diagnostic from json output", function()
+            local diagnostic = parser({ output = output })
+            assert.same({
+                {
+                    code = "missing-module-docstring",
+                    col = 1,
+                    message_id = "C0114",
+                    message = "Missing module docstring",
+                    row = 1,
+                    severity = 3,
+                    symbol = "missing-module-docstring",
+                },
+                {
+                    row = 1,
+                    col = 1,
+                    severity = 3,
+                    code = "invalid-name",
+                    message_id = "C0103",
+                    message = 'Constant name "s" doesn\'t conform to UPPER_CASE naming style',
+                    symbol = "invalid-name",
+                    end_col = 2,
+                    end_row = 1,
+                },
             }, diagnostic)
         end)
     end)
@@ -1032,35 +1202,59 @@ describe("diagnostics", function()
         it("should create a diagnostic", function()
             local output = [[
                 [
-                  {
-                    "type": "issue",
-                    "check_name": "[risky-file-permissions] File permissions unset or incorrect",
-                    "categories": [
-                      "unpredictability",
-                      "experimental"
-                    ],
-                    "severity": "blocker",
-                    "description": "Missing or unsupported mode parameter can cause unexpected file permissions based on version of Ansible being used. Be explicit, like ``mode: 0644`` to avoid hitting this rule. Special ``preserve`` value is accepted only by copy, template modules. See https://github.com/ansible/ansible/issues/71200",
-                    "fingerprint": "b66d9f9db860c0fedb7d1d583c5a808df9a1ed72b8abdbedeff0aad836490951",
-                    "location": {
-                      "path": "playbooks/test-ansible.yaml",
-                      "lines": {
-                        "begin": 5
-                      }
+                    {
+                        "type": "issue",
+                        "check_name": "[risky-file-permissions] File permissions unset or incorrect",
+                        "categories": [
+                            "unpredictability",
+                            "experimental"
+                        ],
+                        "severity": "blocker",
+                        "description": "Missing or unsupported mode parameter can cause unexpected file permissions based on version of Ansible being used. Be explicit, like ``mode: 0644`` to avoid hitting this rule. Special ``preserve`` value is accepted only by copy, template modules. See https://github.com/ansible/ansible/issues/71200",
+                        "fingerprint": "b66d9f9db860c0fedb7d1d583c5a808df9a1ed72b8abdbedeff0aad836490951",
+                        "location": {
+                            "path": "playbooks/.null-ls_123456_test-ansible.yaml",
+                            "lines": {
+                                "begin": 5
+                            }
+                        },
+                        "content": {
+                            "body": "Task/Handler: This tasks is no good"
+                        }
                     },
-                    "content": {
-                      "body": "Task/Handler: This tasks is no good"
+                    {
+                        "type": "issue",
+                        "check_name": "yaml[truthy]",
+                        "categories": [
+                            "formatting",
+                            "yaml"
+                        ],
+                        "severity": "info",
+                        "description": "truthy value should be one of \\[false, true]",
+                        "fingerprint": "8564f80bca9d93054e646e7ec5cfe5ee2c279b821ca183183c79d055bc062b8d",
+                        "location": {
+                            "path": "playbooks/imported-tasks.yaml",
+                            "lines": {
+                                "begin": 3
+                            }
+                        }
                     }
-                  }
                 ]
             ]]
-            local diagnostic = parser({ output = vim.json.decode(output), content = file })
+            local diagnostic = parser({
+                output = vim.json.decode(output),
+                content = file,
+                temp_path = "/home/null-ls/test/playbooks/.null-ls_123456_test-ansible.yaml",
+                root = "/home/null-ls/test",
+                bufname = "/home/null-ls/test/playbooks/test-ansible.yaml",
+            })
             assert.same({
                 {
                     row = 5,
                     severity = 1,
-                    message = "[risky-file-permissions] File permissions unset or incorrect",
-                    filename = "playbooks/test-ansible.yaml",
+                    message = "Missing or unsupported mode parameter can cause unexpected file permissions based on version of Ansible being used. Be explicit, like ``mode: 0644`` to avoid hitting this rule. Special ``preserve`` value is accepted only by copy, template modules. See https://github.com/ansible/ansible/issues/71200",
+                    code = "[risky-file-permissions] File permissions unset or incorrect",
+                    filename = "/home/null-ls/test/playbooks/test-ansible.yaml",
                 },
             }, diagnostic)
         end)
@@ -1726,6 +1920,233 @@ Oct 27, 2022 10:27:27 AM net.sourceforge.pmd.cache.FileAnalysisCache persist
 INFO: Analysis cache updated]],
             })
             assert.same({}, parsed)
+        end)
+    end)
+
+    describe("clazy", function()
+        local linter = diagnostics.clazy
+        local parser = linter._opts.on_output
+
+        it("should create a diagnostic with warning severity", function()
+            local output =
+                "/home/null-ls/project/src/file.cpp:57:5: warning: signal selected is overloaded [-Wclazy-overloaded-signal]"
+            local diagnostic = parser(output, {
+                bufname = "/home/null-ls/project/src/file.cpp",
+            })
+
+            assert.same({
+                row = "57",
+                col = "5",
+                source = "clazy",
+                message = "signal selected is overloaded [-Wclazy-overloaded-signal]",
+                severity = 2,
+            }, diagnostic)
+        end)
+        it("should ignore line with diagnostic from other file", function()
+            local output =
+                "/home/null-ls/project/src/other_file.cpp:57:5: warning: signal selected is overloaded [-Wclazy-overloaded-signal]"
+            local diagnostic = parser(output, {
+                bufname = "/home/null-ls/project/src/file.cpp",
+            })
+
+            assert.same(nil, diagnostic)
+        end)
+        it("should ignore line with no diagnostic info", function()
+            local output = "In file included from /home/null-ls/project/src/file.cpp:40:"
+            local diagnostic = parser(output, {
+                bufname = "/home/null-ls/project/src/file.cpp",
+            })
+
+            assert.same(nil, diagnostic)
+        end)
+    end)
+
+    describe("reek", function()
+        local linter = diagnostics.reek
+        local parser = linter._opts.on_output
+
+        it("should return no errors when no output", function()
+            assert.same({}, parser({ output = nil }))
+            assert.same({}, parser({ output = {} }))
+        end)
+
+        it("should generate a diagnostic for errors", function()
+            local output = vim.json.decode([[
+              [
+                {
+                  "context": "Validators::Commission::AirlineAndConsolidator",
+                  "lines": [
+                    3, 10
+                  ],
+                  "message": "assumes too much for instance variable '@commission'",
+                  "smell_type": "InstanceVariableAssumption",
+                  "source": "app/validators/commission/sample.rb",
+                  "assumption": "@commission",
+                  "documentation_link": "https://github.com/troessner/reek/blob/v6.1.4/docs/Instance-Variable-Assumption.md"
+                },
+                {
+                  "context": "Validators::Commission::ChargeAmount#call",
+                  "lines": [
+                    4
+                  ],
+                  "message": "has approx 6 statements",
+                  "smell_type": "TooManyStatements",
+                  "source": "app/validators/commission/charge_amount.rb",
+                  "count": 6,
+                  "documentation_link": "https://github.com/troessner/reek/blob/v6.1.4/docs/Too-Many-Statements.md"
+                }
+              ]
+            ]])
+            local diagnostic = parser({ output = output })
+            assert.same({
+                {
+                    message = "InstanceVariableAssumption: assumes too much for instance variable '@commission'",
+                    filename = "app/validators/commission/sample.rb",
+                    smell_type = "InstanceVariableAssumption",
+                    severity = 2,
+                    row = 3,
+                    col = 0,
+                    end_col = 1,
+                },
+                {
+                    message = "InstanceVariableAssumption: assumes too much for instance variable '@commission'",
+                    filename = "app/validators/commission/sample.rb",
+                    smell_type = "InstanceVariableAssumption",
+                    severity = 2,
+                    row = 10,
+                    col = 0,
+                    end_col = 1,
+                },
+                {
+                    message = "TooManyStatements: has approx 6 statements",
+                    filename = "app/validators/commission/charge_amount.rb",
+                    smell_type = "TooManyStatements",
+                    severity = 2,
+                    row = 4,
+                    col = 0,
+                    end_col = 1,
+                },
+            }, diagnostic)
+        end)
+    end)
+
+    describe("terraform_validate", function()
+        local linter = diagnostics.terraform_validate
+        local parser = linter._opts.on_output
+
+        it("should create a diagnostic for general errors", function()
+            local output = vim.json.decode([[
+              {
+                "format_version": "1.0",
+                "valid": false,
+                "error_count": 1,
+                "warning_count": 0,
+                "diagnostics": [
+                  {
+                    "severity": "error",
+                    "summary": "missing provider provider[\"registry.terraform.io/hashicorp/aws\"].foobar",
+                    "detail": ""
+                  }
+                ]
+              }
+            ]])
+            local diagnostic = parser({ output = output })
+            assert.same({
+                {
+                    col = 0,
+                    message = 'missing provider provider["registry.terraform.io/hashicorp/aws"].foobar - ',
+                    row = 0,
+                    severity = 1,
+                    source = "terraform validate",
+                },
+            }, diagnostic)
+        end)
+        it("should create a diagnostic for specific errors", function()
+            local output = vim.json.decode([[
+              {
+                "format_version": "1.0",
+                "valid": false,
+                "error_count": 2,
+                "warning_count": 0,
+                "diagnostics": [
+                  {
+                    "severity": "error",
+                    "summary": "Reference to undeclared local value",
+                    "detail": "A local value with the name \"foobar\" has not been declared.",
+                    "range": {
+                      "filename": "main.tf",
+                      "start": {
+                        "line": 102,
+                        "column": 17,
+                        "byte": 2555
+                      },
+                      "end": {
+                        "line": 102,
+                        "column": 50,
+                        "byte": 2588
+                      }
+                    },
+                    "snippet": {
+                      "context": "module \"foo\"",
+                      "code": "  bucket_name = local.foobar",
+                      "start_line": 102,
+                      "highlight_start_offset": 16,
+                      "highlight_end_offset": 49,
+                      "values": []
+                    }
+                  },
+                  {
+                    "severity": "error",
+                    "summary": "Reference to undeclared local value",
+                    "detail": "A local value with the name \"foobar\" has not been declared.",
+                    "range": {
+                      "filename": "main.tf",
+                      "start": {
+                        "line": 97,
+                        "column": 17,
+                        "byte": 2438
+                      },
+                      "end": {
+                        "line": 97,
+                        "column": 50,
+                        "byte": 2471
+                      }
+                    },
+                    "snippet": {
+                      "context": "module \"bar\"",
+                      "code": "  bucket_name = local.foobar",
+                      "start_line": 97,
+                      "highlight_start_offset": 16,
+                      "highlight_end_offset": 49,
+                      "values": []
+                    }
+                  }
+                ]
+              }
+            ]])
+            local diagnostic = parser({ output = output })
+            assert.same({
+                {
+                    col = 17,
+                    end_col = 50,
+                    end_row = 102,
+                    filename = "main.tf",
+                    message = 'Reference to undeclared local value - A local value with the name "foobar" has not been declared.',
+                    row = 102,
+                    severity = 1,
+                    source = "terraform validate",
+                },
+                {
+                    col = 17,
+                    end_col = 50,
+                    end_row = 97,
+                    filename = "main.tf",
+                    message = 'Reference to undeclared local value - A local value with the name "foobar" has not been declared.',
+                    row = 97,
+                    severity = 1,
+                    source = "terraform validate",
+                },
+            }, diagnostic)
         end)
     end)
 end)
